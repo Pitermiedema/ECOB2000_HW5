@@ -1,0 +1,207 @@
+---
+title: "Lab4_gender_edu"
+output: html_document
+date: "2026-10-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(AER)
+load("d_HHP2020_24.RData")
+prime_age_laborforce_data <- d_HHP2020_24 %>% filter(!is.na(work_kind) &
+                                                       Age >= 25 & Age <= 55)
+
+```
+
+```{}
+```
+
+Check gender categories
+
+```{r}
+table(prime_age_laborforce_data$Gender)
+
+
+```
+
+```{r}
+d <- subset(prime_age_laborforce_data,
+            Gender %in% c("male", "female") & Education != "lt hs")
+d$Education <- factor(d$Education,
+                      levels = c("some hs", "high school", "some college",
+                                 "assoc deg", "college grad", "adv degree"))
+d$Gender <- factor(d$Gender, levels = c("male", "female"))
+table(d$Gender, d$Education)
+
+
+```
+
+Looking to see if the gender gap (between men and women) changes as education is increased
+
+```{r}
+model_a <- lm(income_midpoint ~ Age + Gender * Education, data = d)
+summary(model_a)
+```
+
+The standard error is bigger than all but 1 of the estimates. T values suggest there is mostly noise in these numbers. Of possible interest is the result for female:Associate degree. This produced the highest reduction in wage gap but doesn't give a high enough confidence interval to make it meaningful. The one conclusion we can make is that there is approximately a \$20000 wage gap at all education levels.
+
+```{r}
+model_b <- lm(income_midpoint ~ Age + Gender * Education + Race, data = d)
+summary(model_b)
+
+
+```
+
+Looking to see if race affects the wage gap, first advanced degrees
+
+```{r}
+adv <- subset(d, Education == "adv degree")
+model_d <- lm(income_midpoint ~ Age + Gender * Race, data = adv)
+summary(model_d)
+
+```
+
+For advanced degrees, it appears that being Black and being Asian both provide meaningful effects. The gap widens by \$4800 for Black women (t value -2.7) and shrinks by almost \$7500 for Asian women (t value 5.5). These findings have a low R squared, however, suggesting that they only explain \<7% of the difference in wages. Race 'Other' has a t value that is too low to be significant.
+
+```{r}
+cg <- subset(d, Education == "college grad")
+model_cg <- lm(income_midpoint ~ Age + Gender * Race, data = cg)
+summary(model_cg)
+
+```
+
+```         
+```
+
+We get similar results with College degree. The gap widens for Black women by \$3736, and narrows by \$6160 for Asian women with similar R squared.
+
+```{r}
+ad <- subset(d, Education == "assoc deg")
+model_ad <- lm(income_midpoint ~ Age + Gender * Race, data = ad)
+summary(model_ad)
+
+```
+
+The effect gets more pronounced with Associate degrees. The wage gap increases by \$8146 for Black women and decreases by \$9571 for Asian women (more than half of the baseline gap). The t values suggest significant results but the R squared remains just under 7%.
+
+```{r}
+sc <- subset(d, Education == "some college")
+model_sc <- lm(income_midpoint ~ Age + Gender * Race, data = sc)
+summary(model_sc)
+
+```
+
+For 'some college' there doesn't appear to be a reliable result for Black women. Asian women, however close the gap by \$11862. R squared is now 9.6%.
+
+```{r}
+hs <- subset(d, Education == "high school")
+model_hs <- lm(income_midpoint ~ Age + Gender * Race, data = hs)
+summary(model_hs)
+
+```
+
+t values of 'HS grad' are too low to provide reliable results
+
+```{r}
+shs <- subset(d, Education == "some hs")
+model_shs <- lm(income_midpoint ~ Age + Gender * Race, data = shs)
+summary(model_shs)
+
+```
+
+The t value for black women is too low to suggest a detectable difference. Asian women with 'some HS' appear to completely close the gender wage gap.
+
+```{r}
+model_c <- lm(income_midpoint ~ Age + Gender + Race * Education, data = d)
+
+new <- expand.grid(Age = 40,
+                   Gender = "female",
+                   Race = c("white", "Black", "Asian", "other"),
+                   Education = levels(d$Education))
+new$yhat <- predict(model_c, newdata = new)
+
+tab <- round(xtabs(yhat ~ Race + Education, data = new))
+tab <- as.data.frame.matrix(tab)
+tab <- tab[c("white", "Black", "Asian", "other"), levels(d$Education)]
+
+men <- data.frame(Age = 40, Gender = "male", Race = "white",
+                  Education = levels(d$Education))
+tab["white men", ] <- round(predict(model_c, newdata = men))
+
+tab[] <- lapply(tab, function(x) paste0("$", format(x, big.mark = ",", trim = TRUE)))
+rownames(tab)[1:4] <- c("white women", "Black women", "Asian women", "other women")
+knitr::kable(tab, align = "r", caption = "Predicted income, age 40")
+
+
+```
+
+```{r}
+confint(model_a)
+
+```
+
+The 95% interval for gender female excludes 0, and is thus, significant. The intervals for education level all include 0, and thus the gender gap does not differ detectably across education levels.
+
+```{r}
+anova(lm(income_midpoint ~ Age + Gender + Education, data = d), model_a)
+
+```
+
+F = 9.66, p \<.001, suggesting that the gender gap does vary by education level, contradicting the confidence interval findings, though the improvement in fit is small.
+
+```{r}
+library(AER)
+coeftest(model_a, vcov = vcovHC(model_a, type = "HC1"))
+
+```
+
+Standard errors shrank 20%-25%. T values remained significant for Education and Gender but failed to show an impact on wage gap across educational levels. Associate degree t increased to 1.84 making it significant at the 10% level but not at 5%.
+
+```{r}
+model_log <- lm(log(income_midpoint) ~ Age + Gender * Education, data = d)
+summary(model_log)
+
+```
+
+The t values for genderfemale:education level become significant in the log model. While the absolute \$value of the gap remained around \$20000, the percentage of the gap falls as incomes rise.
+
+```{r}
+b <- coef(model_log)
+gap <- c(b["Genderfemale"],
+         b["Genderfemale"] + b[grep("Genderfemale:", names(b))])
+names(gap) <- levels(d$Education)
+round(100 * (exp(gap) - 1), 1)
+
+```
+
+```{r}
+mean(fitted(model_a))
+mean(exp(fitted(model_log)))
+
+```
+
+```{r}
+ages <- 25:55
+pm <- predict(model_a, data.frame(Age = ages, Gender = "male", Education = "adv degree"))
+pf <- predict(model_a, data.frame(Age = ages, Gender = "female", Education = "adv degree"))
+plot(ages, pm, type = "l", ylim = range(pm, pf),
+     xlab = "Age", ylab = "Predicted income",
+     main = "Advanced degree: predicted income by age")
+lines(ages, pf, lty = 2)
+legend("topleft", c("male", "female"), lty = 1:2)
+
+```
+
+These results show associations, not proven causes. Education plausibly affects income, given more schooling presumably increases skills and makes one more valuable to an employer. It is clear that there is a difference in income by gender, with an approximately \$20000 gap between men and women at each educational level. This gap remains roughly the same as incomes rise so decreases in proportion at higher income and educational levels. This is demonstrated in the log model. The low R squared (7% to 22%) shows that most of what drives income is outside of this model, such as hours worked, field of study, years of experience, and region.
+
+I restricted the data set to working age people to avoid students and retirees. I dropped 'it hs' as this was a very small number of people. I ran gender-by-race model separately for each educational level, so race and gender gaps could differ by education. Hispanic ethnicity was not controlled in the education level models. Adding it to the race by education model left the gender gap unchanged but reduced the Asian and Other gaps at lower educational levels.
+
+```{r}
+model_c2 <- lm(income_midpoint ~ Age + Gender + Race * Education + Hispanic, data = d)
+summary(model_c2)
+
+```
